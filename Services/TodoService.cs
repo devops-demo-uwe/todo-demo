@@ -1,4 +1,5 @@
 using TodoApp.Models;
+using Microsoft.Extensions.Logging;
 
 namespace TodoApp.Services;
 
@@ -7,12 +8,17 @@ namespace TodoApp.Services;
 /// </summary>
 public class TodoService
 {
+    private readonly FileService _fileService;
+    private readonly ILogger<TodoService> _logger;
+    private const int MaxDescriptionLength = 200;
+
     /// <summary>
     /// Initializes a new instance of the TodoService class
     /// </summary>
-    public TodoService()
+    public TodoService(FileService fileService, ILogger<TodoService> logger)
     {
-        // TODO: Implement constructor
+        _fileService = fileService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -21,9 +27,17 @@ public class TodoService
     /// <returns>Collection of todo items</returns>
     public async Task<IEnumerable<TodoItem>> GetAllAsync()
     {
-        // TODO: Implement method
-        await Task.CompletedTask;
-        return Enumerable.Empty<TodoItem>();
+        try
+        {
+            var todos = await _fileService.LoadAsync();
+            _logger.LogInformation("Retrieved {Count} todo items", todos.Count());
+            return todos;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve todo items");
+            throw;
+        }
     }
 
     /// <summary>
@@ -34,9 +48,60 @@ public class TodoService
     /// <returns>The created todo item</returns>
     public async Task<TodoItem> AddAsync(string description, DateTime? dueDate = null)
     {
-        // TODO: Implement method
-        await Task.CompletedTask;
-        return new TodoItem();
+        try
+        {
+            // Validate description
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                throw new ArgumentException("Task description is required.", nameof(description));
+            }
+
+            if (description.Length > MaxDescriptionLength)
+            {
+                throw new ArgumentException($"Task description cannot exceed {MaxDescriptionLength} characters.", nameof(description));
+            }
+
+            // Validate due date if provided
+            if (dueDate.HasValue && dueDate.Value < DateTime.Today)
+            {
+                throw new ArgumentException("Due date cannot be in the past.", nameof(dueDate));
+            }
+
+            // Load existing todos to generate new ID
+            var existingTodos = await _fileService.LoadAsync();
+            var todoList = existingTodos.ToList();
+            
+            // Generate new ID
+            var maxId = todoList.Any() ? todoList.Max(t => t.Id) : 0;
+            var newId = maxId + 1;
+
+            // Create new todo item
+            var newTodo = new TodoItem
+            {
+                Id = newId,
+                Description = description.Trim(),
+                CreatedDate = DateTime.Now,
+                DueDate = dueDate,
+                CompletedDate = null
+            };
+
+            // Add to collection and save
+            todoList.Add(newTodo);
+            var saveSuccess = await _fileService.SaveAsync(todoList);
+
+            if (!saveSuccess)
+            {
+                throw new InvalidOperationException("Failed to save the new todo item.");
+            }
+
+            _logger.LogInformation("Successfully created todo item with ID {Id}: {Description}", newId, description);
+            return newTodo;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to add todo item: {Description}", description);
+            throw;
+        }
     }
 
     /// <summary>
